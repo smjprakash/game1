@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>SQL Bingo Quiz Game</title>
+<style>
+  body { font-family: Arial, sans-serif; padding: 20px; background: #f0f0f0; }
+  h1 { text-align: center; margin-bottom: 30px; }
+  .game-container {
+    border: 2px solid #333;
+    padding: 15px;
+    background: white;
+    max-width: 700px;
+    margin-left: auto;
+    margin-right: auto;
+  }
+  h2 { text-align: center; }
+  table { border-collapse: collapse; margin: 0 auto 15px auto; }
+  td, th {
+    border: 1px solid #555;
+    width: 120px;
+    height: 60px;
+    text-align: center;
+    vertical-align: middle;
+    padding: 5px;
+    font-weight: bold;
+    background: white;
+    transition: background-color 0.3s;
+  }
+  td { cursor: pointer; user-select: none; }
+  td.selected { background-color: lightgreen; cursor: default; }
+  td.error { background-color: lightcoral; }
+  th.bingo-letter { background-color: #333; color: white; cursor: default; }
+  .question {
+    font-size: 1.3em;
+    margin-bottom: 10px;
+    text-align: center;
+    min-height: 3em;
+    max-width: 600px;
+    margin-left: auto;
+    margin-right: auto;
+  }
+  .message {
+    color: red;
+    font-weight: bold;
+    height: 1.5em;
+    text-align: center;
+    margin-bottom: 10px;
+  }
+  .next-btn {
+    display: block;
+    margin: 0 auto;
+    padding: 10px 20px;
+    font-size: 1.1em;
+    cursor: pointer;
+  }
+  #confetti-canvas {
+    position: fixed;
+    top: 0;
+    left: 0;
+    pointer-events: none;
+    width: 100%;
+    height: 100%;
+    z-index: 999;
+  }
+</style>
+</head>
+<body>
+
+<h1>SQL Bingo Quiz Game</h1>
+<div id="timer">Time Remaining: 03:00</div>
+<div id="game" class="game-container"></div>
+<canvas id="confetti-canvas"></canvas>
+
+<script>
+// BINGO Letters
+const bingoLetters = ["B", "I", "N", "G", "O"];
+
+// Sample question set
+const sets = {
+  set1: {
+    keywords: [
+      "WHERE", "LIMIT", "BETWEEN", "CHECK", "HAVING",
+      "RENAME", "NOT NULL", "CREATE", "PRIMARY KEY", "UNIQUE",
+      "IS NULL", "INT", "DISTINCT", "UPDATE", "CHAR",
+      "TRUNCATE", "COUNT()", "CONCAT", "SELECT", "LIKE",
+      "DROP", "ORDER BY", "FOREIGN KEY", "ALTER", "VARCHAR"
+    ],
+    questionsPool: [
+      {q: "Filter records based on condition?", answer: "WHERE"},
+      {q: "Limit result rows?", answer: "LIMIT"},
+      {q: "Check range of values?", answer: "BETWEEN"},
+      {q: "Ensure condition on column?", answer: "CHECK"},
+      {q: "Filter after aggregation?", answer: "HAVING"},
+      {q: "Rename a table?", answer: "RENAME"},
+      {q: "Ensure column has value?", answer: "NOT NULL"},
+      {q: "Create new object?", answer: "CREATE"},
+      {q: "Master table constraint?", answer: "PRIMARY KEY"},
+      {q: "Ensure unique column values?", answer: "UNIQUE"},
+      {q: "Check for NULL?", answer: "IS NULL"},
+      {q: "Whole number type?", answer: "INT"},
+      {q: "Remove duplicates?", answer: "DISTINCT"},
+      {q: "Modify existing records?", answer: "UPDATE"},
+      {q: "Fixed-length string type?", answer: "CHAR"},
+      {q: "Remove all rows, keep structure?", answer: "TRUNCATE"},
+      {q: "Count the number of rows?", answer: "COUNT()"},
+      {q: "Join strings together?", answer: "CONCAT"},
+      {q: "Read data from the table?", answer: "SELECT"},
+      {q: "Search for a pattern?", answer: "LIKE"},
+      {q: "Delete table or DB?", answer: "DROP"},
+      {q: "Arrange output in order?", answer: "ORDER BY"},
+      {q: "Reference another table?", answer: "FOREIGN KEY"},
+      {q: "Modify table structure?", answer: "ALTER"},
+      {q: "Variable-length string type?", answer: "VARCHAR"}
+    ]
+  }
+};
+
+// Set from URL hash (#set1)
+function getSetNameFromURL() {
+  const hash = window.location.hash.toLowerCase();
+  if (hash.startsWith("#") && sets[hash.substring(1)]) {
+    return hash.substring(1);
+  }
+  return "set1";
+}
+
+// Timer function
+function startTimer(callback) {
+  let t = 180, elm = document.getElementById("timer");
+  const iv = setInterval(() => {
+    t--;
+    elm.textContent = `Time Remaining: ${String(Math.floor(t / 60)).padStart(2, '0')}:${String(t % 60).padStart(2, '0')}`;
+    if (t <= 0) { clearInterval(iv); callback(); }
+  }, 1000);
+  return iv;
+}
+
+// Main Game Class
+class BingoGame {
+  constructor(container) {
+    this.container = container;
+    this.setName = getSetNameFromURL();
+    this.keywords = sets[this.setName].keywords;
+    this.questions = this.shuffleArray(sets[this.setName].questionsPool).slice(0, this.keywords.length);
+    this.currentQuestionIndex = -1;
+    this.answeredCorrectly = new Set();
+    this.bingoRowsCompleted = new Set();
+    this.bingoColsCompleted = new Set();
+    this.bingoRowHeaders = [];
+    this.bingoColHeaders = [];
+    this.initUI();
+    this.timerInterval = startTimer(() => this.end(true));
+    this.nextQuestion();
+  }
+
+  shuffleArray(arr) {
+    let a = arr.slice();
+    for (let i = a.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [a[i], a[j]] = [a[j], a[i]];
+    }
+    return a;
+  }
+
+  initUI() {
+    this.container.innerHTML = `
+      <h2>Set: ${this.setName.toUpperCase()}</h2>
+      <div class="question" id="question"></div>
+      <div class="message" id="message"></div>
+      <table id="bingo-table"></table>
+      <button class="next-btn" id="next-btn" disabled>Next Question</button>
+    `;
+    this.questionDiv = this.container.querySelector("#question");
+    this.messageDiv = this.container.querySelector("#message");
+    this.bingoTable = this.container.querySelector("#bingo-table");
+    this.nextBtn = this.container.querySelector("#next-btn");
+
+    this.nextBtn.addEventListener("click", () => this.nextQuestion());
+    this.drawBoard();
+  }
+
+  drawBoard() {
+    this.bingoTable.innerHTML = "";
+    const size = 5;
+    const thead = document.createElement("thead");
+    const headerRow = document.createElement("tr");
+    headerRow.appendChild(document.createElement("th"));
+    for (let c = 0; c < size; c++) {
+      const th = document.createElement("th");
+      th.innerHTML = "&nbsp;";
+      th.dataset.col = c;
+      th.classList.add("bingo-letter");
+      headerRow.appendChild(th);
+      this.bingoColHeaders.push(th);
+    }
+    thead.appendChild(headerRow);
+    this.bingoTable.appendChild(thead);
+
+    const tbody = document.createElement("tbody");
+    for (let r = 0; r < size; r++) {
+      const tr = document.createElement("tr");
+      const th = document.createElement("th");
+      th.innerHTML = "&nbsp;";
+      th.dataset.row = r;
+      th.classList.add("bingo-letter");
+      tr.appendChild(th);
+      this.bingoRowHeaders.push(th);
+
+      for (let c = 0; c < size; c++) {
+        const td = document.createElement("td");
+        const idx = r * size + c;
+        td.textContent = this.keywords[idx];
+        td.dataset.keyword = this.keywords[idx];
+        td.dataset.row = r;
+        td.dataset.col = c;
+        td.addEventListener("click", (e) => this.onCellClick(e));
+        tr.appendChild(td);
+      }
+      tbody.appendChild(tr);
+    }
+    this.bingoTable.appendChild(tbody);
+  }
+
+  onCellClick(event) {
+    if (!this.nextBtn.disabled) return;
+    const cell = event.target;
+    const selectedKeyword = cell.dataset.keyword;
+    const correctAnswer = this.questions[this.currentQuestionIndex].answer;
+
+    if (selectedKeyword === correctAnswer) {
+      cell.classList.add("selected");
+      this.messageDiv.style.color = "green";
+      this.messageDiv.textContent = "Correct!";
+      this.answeredCorrectly.add(selectedKeyword);
+      this.nextBtn.disabled = false;
+
+      const row = Number(cell.dataset.row);
+      const col = Number(cell.dataset.col);
+
+      this.checkRowCompleted(row);
+      this.checkColCompleted(col);
+    } else {
+      cell.classList.add("error");
+      this.messageDiv.style.color = "red";
+      this.messageDiv.textContent = "Error: Wrong box selected!";
+      setTimeout(() => {
+        cell.classList.remove("error");
+        this.messageDiv.textContent = "";
+        this.nextQuestion();
+      }, 1000);
+    }
+  }
+
+  nextQuestion() {
+    this.currentQuestionIndex++;
+    if (this.currentQuestionIndex >= this.questions.length) {
+      this.questionDiv.textContent = "Game Over! Thanks for playing.";
+      this.nextBtn.disabled = true;
+      return;
+    }
+    this.showQuestion();
+    this.messageDiv.textContent = "";
+    this.nextBtn.disabled = true;
+  }
+
+  showQuestion() {
+    this.questionDiv.textContent = this.questions[this.currentQuestionIndex].q;
+  }
+
+  checkRowCompleted(row) {
+    const size = 5;
+    for (let c = 0; c < size; c++) {
+      const keyword = this.keywords[row * size + c];
+      if (!this.answeredCorrectly.has(keyword)) return;
+    }
+    if (!this.bingoRowsCompleted.has(row)) {
+      this.bingoRowsCompleted.add(row);
+      alert(`BINGO! Completed row ${bingoLetters[row]}`);
+      this.bingoRowHeaders[row].textContent = bingoLetters[row];
+      this.checkGameCompletion();
+    }
+  }
+
+  checkColCompleted(col) {
+    const size = 5;
+    for (let r = 0; r < size; r++) {
+      const keyword = this.keywords[r * size + col];
+      if (!this.answeredCorrectly.has(keyword)) return;
+    }
+    if (!this.bingoColsCompleted.has(col)) {
+      this.bingoColsCompleted.add(col);
+      alert(`BINGO! Completed column ${bingoLetters[col]}`);
+      this.bingoColHeaders[col].textContent = bingoLetters[col];
+      this.checkGameCompletion();
+    }
+  }
+
+  checkGameCompletion() {
+    const size = 5;
+    if (this.bingoRowsCompleted.size === size || this.bingoColsCompleted.size === size) {
+      alert("🎉 Congratulations! You completed all rows or columns! 🎉");
+      launchConfetti();
+      this.end(false);
+    }
+  }
+
+  end(timeUp = false) {
+    this.questionDiv.textContent = timeUp ? "⏰ Time's up! Game Over!" : "Game Over! Thanks for playing.";
+    this.nextBtn.disabled = true;
+    const allCells = this.bingoTable.querySelectorAll("td");
+    allCells.forEach(cell => cell.style.pointerEvents = "none");
+  }
+}
+
+function launchConfetti() {
+  const canvas = document.getElementById("confetti-canvas");
+  const ctx = canvas.getContext("2d");
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+
+  const confetti = [];
+  const confettiCount = 150;
+
+  for (let i = 0; i < confettiCount; i++) {
+    confetti.push({
+      x: Math.random() * canvas.width,
+      y: Math.random() * canvas.height - canvas.height,
+      r: Math.random() * 6 + 4,
+      d: Math.random() * confettiCount,
+      color: `hsl(${Math.floor(Math.random() * 360)}, 100%, 50%)`,
+      tilt: Math.random() * 10 - 10
+    });
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    for (let c of confetti) {
+      ctx.beginPath();
+      ctx.lineWidth = c.r;
+      ctx.strokeStyle = c.color;
+      ctx.moveTo(c.x + c.tilt + c.r / 2, c.y);
+      ctx.lineTo(c.x + c.tilt, c.y + c.tilt + c.r / 2);
+      ctx.stroke();
+    }
+    update();
+  }
+
+  function update() {
+    for (let c of confetti) {
+      c.y += Math.cos(c.d) + 1 + c.r / 2;
+      c.tilt += Math.sin(c.d);
+      if (c.y > canvas.height) {
+        c.y = -10;
+        c.x = Math.random() * canvas.width;
+      }
+    }
+  }
+
+  const interval = setInterval(draw, 20);
+  setTimeout(() => {
+    clearInterval(interval);
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+  }, 6000);
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+  const gameDiv = document.getElementById("game");
+  new BingoGame(gameDiv);
+});
+</script>
+</body>
+</html>
