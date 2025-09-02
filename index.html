@@ -216,7 +216,7 @@ function getSetNameFromURL() {
 
 // Timer function
 function startTimer(callback) {
-  let t = 180, elm = document.getElementById("timer");
+  let t = 600, elm = document.getElementById("timer");
   const iv = setInterval(() => {
     t--;
     elm.textContent = `Time Remaining: ${String(Math.floor(t / 60)).padStart(2, '0')}:${String(t % 60).padStart(2, '0')}`;
